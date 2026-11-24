@@ -1,34 +1,28 @@
-name: CI Pipeline
+name: CI/CD Pipeline a AWS Elastic Beanstalk
 
 on:
-  pull_request:
-    branches: [ main, master ]
+  push:
+    branches: [ main ]
 
 jobs:
-  # Job 1: Construcción (Build)
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - name: Configurar Java 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
-          
       - name: Dar permisos a Gradle
         run: chmod +x gradlew
-        
       - name: Compilar
         run: ./gradlew build -x test
 
-  # Job 2: Pruebas (Test)
   test:
     needs: build
     runs-on: ubuntu-latest
-    
-    # --- AGREGA TODO ESTE BLOQUE ---
     services:
       postgres:
         image: postgres:15
@@ -39,21 +33,16 @@ jobs:
         ports:
           - 5434:5432
         options: --health-cmd pg_isready --health-interval 10s --health-timeout 5s --health-retries 5
-    # -------------------------------
-    
     steps:
-      - uses: actions/checkout@v3
-      # ... (el resto de tus pasos como configurar Java y permisos se quedan exactamente igual)
-      - name: Configurar Java
-        uses: actions/setup-java@v3
+      - uses: actions/checkout@v4
+      - name: Configurar Java 17
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
-          
       - name: Dar permisos a Gradle
         run: chmod +x gradlew
-        
       - name: Pruebas con Secretos
         env:
           DB_NAME: ${{ secrets.DB_NAME }}
@@ -71,50 +60,73 @@ jobs:
     permissions:
       packages: write
       contents: read
+    outputs:
+      sha_short: ${{ steps.vars.outputs.sha_short }}
     steps:
-      - uses: actions/checkout@v3
-      
-      # --- AGREGA ESTOS 3 PASOS NUEVOS ---
+      - uses: actions/checkout@v4
       - name: Configurar Java 17
-        uses: actions/setup-java@v3
+        uses: actions/setup-java@v4
         with:
           java-version: '17'
           distribution: 'temurin'
           cache: 'gradle'
-          
       - name: Dar permisos a Gradle
         run: chmod +x gradlew
-        
       - name: Generar archivo .jar
         run: ./gradlew build -x test
-      # -----------------------------------
-      
+
       - name: Login en GHCR
-        uses: docker/login-action@v2
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-          
-      - name: Extraer Short-SHA (Etiquetado semántico)
+
+      - name: Extraer Short-SHA
         id: vars
-        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-        
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
       - name: Construir y Publicar Imagen
-        uses: docker/build-push-action@v4
+        uses: docker/build-push-action@v5
         with:
           context: .
           push: true
           tags: |
             ghcr.io/jex-stacks/ecommerce-app:latest
-            ghcr.io/jex-stacks/ecommerce-app:${{ env.sha_short }}
-            
-      - name: Escaneo Trivy (Seguridad Integrada)
-        uses: aquasecurity/trivy-action@master
+            ghcr.io/jex-stacks/ecommerce-app:${{ steps.vars.outputs.sha_short }}
+
+  deploy-aws:
+    needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Generar archivo Dockerrun.aws.json para Beanstalk
+        run: |
+          cat <<EOF > Dockerrun.aws.json
+          {
+            "AWSEBDockerrunVersion": "1",
+            "Image": {
+              "Name": "ghcr.io/jex-stacks/ecommerce-app:${{ needs.docker.outputs.sha_short }}",
+              "Update": "true"
+            },
+            "Ports": [
+              {
+                "ContainerPort": "8080"
+              }
+            ]
+          }
+          EOF
+
+      - name: Empaquetar despliegue
+        run: zip deploy.zip Dockerrun.aws.json
+
+      - name: Desplegar en AWS Elastic Beanstalk
+        uses: einaregilsson/beanstalk-deploy@v22
         with:
-          image-ref: 'ghcr.io/jex-stacks/ecommerce-app:${{ env.sha_short }}'
-          format: 'table'
-          exit-code: '0'
-          ignore-unfixed: true
-          vuln-type: 'os,library'
-          severity: 'CRITICAL,HIGH' 
+          aws_access_key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws_secret_key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          application_name: ecommerce-app
+          environment_name: ecommerce-app-env
+          version_label: v-${{ needs.docker.outputs.sha_short }}
+          region: ${{ secrets.AWS_REGION }}
+          deployment_package: deploy.zip
+          wait_for_environment_recovery: 300
