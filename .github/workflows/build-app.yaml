@@ -95,8 +95,22 @@ jobs:
             ghcr.io/jex-stacks/ecommerce-app:latest
             ghcr.io/jex-stacks/ecommerce-app:${{ steps.vars.outputs.sha_short }}
 
-  deploy-aws:
+  security:
     needs: docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Escaneo de vulnerabilidades en imagen Docker con Trivy
+        uses: aquasecurity/trivy-action@0.28.0
+        with:
+          image-ref: 'ghcr.io/jex-stacks/ecommerce-app:${{ needs.docker.outputs.sha_short }}'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          severity: 'CRITICAL,HIGH'
+
+  deploy-aws:
+    needs: [docker, security]
     runs-on: ubuntu-latest
     steps:
       - name: Generar archivo Dockerrun.aws.json para Beanstalk
