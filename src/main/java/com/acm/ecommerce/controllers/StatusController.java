@@ -10,6 +10,6 @@ public class StatusController {
 
     @GetMapping("/version")
     public String getVersion() {
-        return "<h1>Ecommerce Cloud - Version 1.0</h1><p>Desplegado automaticamente en AWS Elastic Beanstalk</p>";
+        return "<h1>Ecommerce Cloud - Version 2.0</h1><p>Actualizacion de la aplicacion via GitHub Actions en AWS Elastic Beanstalk</p>";
     }
 }
