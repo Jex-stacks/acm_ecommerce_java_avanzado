@@ -100,7 +100,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Escaneo de vulnerabilidades en imagen Docker con Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@master
         with:
           image-ref: 'ghcr.io/jex-stacks/ecommerce-app:${{ needs.docker.outputs.sha_short }}'
           format: 'table'
